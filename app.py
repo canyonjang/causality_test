@@ -27,11 +27,8 @@ def get_all_results():
         df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
     return df
 
-# [NEW] 전체 데이터 초기화 함수
 def reset_experiment_data():
-    # 1. 상태를 waiting으로 변경
     update_experiment_state("waiting")
-    # 2. 기존 학생 데이터 모두 삭제 (student_id가 빈 값이 아닌 모든 행을 삭제)
     supabase.table("causality_test").delete().neq("student_id", "").execute()
 
 # --- 3. 교수용 대시보드 화면 ---
@@ -43,7 +40,8 @@ def professor_view():
 
     if not st.session_state.prof_logged_in:
         st.info("실험을 통제하려면 교수용 비밀번호를 입력하세요.")
-        pwd = st.text_input("비밀번호 (3383):", type="password")
+        # [수정 1] 비밀번호(3383) 힌트 제거 및 숨김 처리
+        pwd = st.text_input("교수용 비밀번호:", type="password")
         if st.button("로그인"):
             if pwd == "3383":
                 st.session_state.prof_logged_in = True
@@ -55,9 +53,8 @@ def professor_view():
     current_state = get_experiment_state()
     st.success(f"현재 실험 상태: **{current_state.upper()}**")
     
-    # [NEW] 빨간색 경고 메시지와 함께 초기화 버튼 배치
     with st.expander("⚠️ 새 수업 시작 (데이터 초기화)", expanded=False):
-        st.warning("이 버튼을 누르면 이전 반의 모든 학생 데이터가 삭제되고 실험이 대기 상태로 초기화됩니다. 필요한 경우 먼저 하단의 표에서 데이터를 다운로드하세요.")
+        st.warning("이 버튼을 누르면 이전 반의 모든 학생 데이터가 삭제되고 실험이 대기 상태로 초기화됩니다.")
         if st.button("🚨 전체 데이터 삭제 및 새 수업 시작", type="primary"):
             reset_experiment_data()
             st.success("데이터가 초기화되었습니다!")
@@ -107,12 +104,13 @@ def professor_view():
                 st.write(f"  * 비율측정 선택자 중 정답: {correct_ratio}명")
             else:
                 st.write("2단계 데이터 제출 전입니다.")
-                
-            st.dataframe(df)
+            
+            # [수정 3] 교수 화면 데이터프레임에서 'id' 열 숨김 처리
+            st.dataframe(df.drop(columns=['id'], errors='ignore'))
         else:
             st.warning("아직 제출된 데이터가 없습니다.")
 
-# --- 4. 학생용 화면 (이전과 동일) ---
+# --- 4. 학생용 화면 ---
 def student_view():
     st.title("📊 데이터 인과성 판독 실험")
     
@@ -156,9 +154,10 @@ def student_view():
                 
             st.warning("이 데이터만 보았을 때, 이것은 원인과 결과(인과관계)일까요, 아니면 단순한 상관관계(허위관계)일까요?")
             
-            answer1 = st.radio("당신의 1차 판단은?", ["선택하세요", "인과관계이다", "허위관계이다"])
+            # [수정 2] index=None을 사용하여 "선택하세요" 옵션 제거
+            answer1 = st.radio("당신의 1차 판단은?", ["인과관계이다", "허위관계이다"], index=None)
             if st.button("판단 제출하기"):
-                if answer1 != "선택하세요":
+                if answer1:
                     response = supabase.table("causality_test").insert({
                         "student_id": st.session_state['student_name'],
                         "stage1_topic": topic,
@@ -175,9 +174,10 @@ def student_view():
             st.write("방금 내린 판단이 맞는지, 분석 모델에 다양한 **통제변수**를 투입하여 확인해 봅시다.")
             
             variables = ['나이', '성별', '소득 수준', '재무 목표 의식']
-            selected_var = st.selectbox("투입할 통제변수를 선택하세요:", ["선택하세요"] + variables)
+            # [수정 2] index=None 및 placeholder 적용
+            selected_var = st.selectbox("투입할 통제변수를 선택하세요:", variables, index=None, placeholder="변수를 선택하세요")
             
-            if selected_var != "선택하세요":
+            if selected_var:
                 is_correct = False
                 explanation = ""
                 
@@ -193,7 +193,8 @@ def student_view():
                 
                 st.divider()
                 if is_correct:
-                    st.success(f"📊 **결과 변화**: '{selected_var}'(이)가 비슷한 그룹끼리만 묶어서 다시 비교해 보니, 두 현상 간의 차이가 사라졌습니다! (그래프가 평평해짐)")
+                    # [수정 4] "(그래프가 평평해짐)" 텍스트 삭제
+                    st.success(f"📊 **결과 변화**: '{selected_var}'(이)가 비슷한 그룹끼리만 묶어서 다시 비교해 보니, 두 현상 간의 차이가 사라졌습니다!")
                     st.markdown("### 📍 [Step 3] 판독 결과: 허위관계 (Spurious Relationship)")
                     st.info(f"**해설:** {explanation}")
                     
@@ -209,36 +210,63 @@ def student_view():
 
     elif current_state == "stage2":
         if 'stage2_done' in st.session_state:
-            st.success("✅ 2단계 답안을 제출했습니다. 화면 최상단의 새로고침을 눌러 결과를 확인하거나 대기하세요.")
+            # [수정 6] "화면 최상단의 새로고침을..." 문구 삭제
+            st.success("✅ 2단계 답안 제출이 완료되었습니다. 아래 분석 결과와 해설을 확인하세요.")
+            
+            # [수정 7] 제출 후 정답 해설 및 타 측정 방식과의 비교 제공
+            my_measure = st.session_state.get('my_s2_measure', '')
+            my_ans = st.session_state.get('my_s2_ans', '')
+            
+            st.markdown("### 📊 분석 결과 및 대조 해설")
+            if my_measure == "명목측정":
+                if my_ans == "허위관계이다":
+                    st.success("🎉 **정답입니다!** 단순한 '예/아니오' 식의 **명목측정**은 소득이라는 제3의 요인을 분리해내지 못해 **허위관계**로 나타납니다.")
+                else:
+                    st.error("❌ **오답입니다.** 단순한 '예/아니오' 식의 **명목측정**은 소득이라는 제3의 요인을 분리해내지 못해 **허위관계**로 나타납니다.")
+                st.info("💡 **비교:** 만약 **비율측정**(전체 소득 중 자동이체 비율)을 선택했다면?\n고소득층의 여유 자금 효과에 가려지지 않고, '자동화 시스템' 자체가 저축을 이끄는 순수한 **인과관계**가 뚜렷하게 증명되었을 것입니다.")
+            
+            elif my_measure == "비율측정":
+                if my_ans == "인과관계이다":
+                    st.success("🎉 **정답입니다!** **비율측정**을 통해 자동화 강도를 정교하게 측정하면, 소득에 가려지지 않고 넛지(시스템) 자체의 **인과관계**가 증명됩니다.")
+                else:
+                    st.error("❌ **오답입니다.** **비율측정**을 통해 자동화 강도를 정교하게 측정하면, 소득에 가려지지 않고 넛지(시스템) 자체의 **인과관계**가 증명됩니다.")
+                st.info("💡 **비교:** 만약 단순한 **명목측정**(예/아니오)을 선택했다면?\n고소득층의 여유 자금 효과를 분리하지 못해 단순한 **허위관계**로 착각했을 것입니다.")
+
         else:
             st.subheader("📍 [2단계] 자동이체 시스템과 저축액의 관계")
-            st.write("자동이체 사용이 저축액에 미치는 영향을 확인하려고 합니다.")
             
-            measure = st.radio("연구자로서 어떤 측정 방식을 선택하시겠습니까?", 
-                               ["선택하세요", 
-                                "A. 명목측정 (자동이체 사용 여부: 예/아니오)", 
-                                "B. 비율측정 (전체 소득 중 자동이체 설정 금액의 비율: %)"])
+            # [수정 8] 가설을 정확하게 먼저 제시
+            st.info("📈 **연구 가설**: 자동이체 저축을 설정한 학생은 그렇지 않은 학생보다 월평균 저축액이 더 많을 것이다.")
+            st.write("위 가설을 검증하기 위해 연구자로서 **조작적 정의(측정 방식)**를 결정하고, 그 결과를 예측해 보세요.")
             
-            if measure != "선택하세요":
-                st.info(f"선택하신 '{measure[:6]}'으로 데이터를 분석했습니다.")
-                ans2 = st.radio("위 측정 방식을 사용했을 때, 소득 수준(제3의 요인)을 고려하면 이 관계는 무엇으로 판별될까요?", 
-                                ["선택하세요", "인과관계이다", "허위관계이다"])
-                
-                if st.button("2단계 최종 제출"):
-                    if ans2 != "선택하세요":
-                        measure_val = "명목측정" if "A" in measure else "비율측정"
-                        if 'record_id' in st.session_state:
-                            supabase.table("causality_test").update({
-                                "stage2_measurement": measure_val,
-                                "stage2_answer": ans2
-                            }).eq("id", st.session_state['record_id']).execute()
-                            st.session_state['stage2_done'] = True
-                            st.rerun()
-                    else:
-                        st.error("판별 결과를 선택해주세요.")
+            # [수정 5 & 7] 선택 옵션을 동시에 보여주고, '선택하세요' 제거
+            measure = st.radio("1. 어떤 측정 방식을 선택하시겠습니까?", 
+                               ["A. 명목측정 (자동이체 설정 여부: 예/아니오)", 
+                                "B. 비율측정 (전체 소득 대비 자동이체 설정 금액의 비율: %)"], index=None)
+            
+            ans2 = st.radio("2. 선택한 측정 방식을 사용할 때, '소득 수준(제3의 요인)'을 고려하면 이 관계는 무엇으로 판별될까요?", 
+                            ["인과관계이다", "허위관계이다"], index=None)
+            
+            if st.button("2단계 최종 제출"):
+                if measure and ans2:
+                    measure_val = "명목측정" if "A" in measure else "비율측정"
+                    if 'record_id' in st.session_state:
+                        supabase.table("causality_test").update({
+                            "stage2_measurement": measure_val,
+                            "stage2_answer": ans2
+                        }).eq("id", st.session_state['record_id']).execute()
+                        
+                        # 해설 출력을 위해 세션에 저장
+                        st.session_state['stage2_done'] = True
+                        st.session_state['my_s2_measure'] = measure_val
+                        st.session_state['my_s2_ans'] = ans2
+                        st.rerun()
+                else:
+                    st.error("측정 방식과 판별 결과를 모두 선택해주세요.")
 
     elif current_state == "results":
         st.success("🎉 모든 실험이 종료되었습니다. 강단 화면에서 우리 반의 종합 통계를 확인하세요.")
+
 
 # --- 5. 메인 라우팅 (사이드바로 통합) ---
 st.sidebar.title("접속 모드 선택")
