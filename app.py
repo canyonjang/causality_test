@@ -12,15 +12,20 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- 한국어 조사 처리 함수 (받침 유무 판별) ---
+# --- 한국어 조사 처리 함수 (수정됨: 따옴표 무시) ---
 def get_josa(word, josa_type):
-    last_char = word[-1]
+    # 단어 양끝의 따옴표를 제거한 순수 단어로 마지막 글자 추출
+    clean_word = word.strip("'\"") 
+    last_char = clean_word[-1]
+    
     if '가' <= last_char <= '힣':
+        # 받침 유무 판별식
         has_batchim = (ord(last_char) - ord('가')) % 28 > 0
         if josa_type == '이가':
             return word + ('이' if has_batchim else '가')
         elif josa_type == '을를':
             return word + ('을' if has_batchim else '를')
+            
     return word + ('(이)가' if josa_type == '이가' else '(을)를')
 
 # --- 2. 데이터베이스 제어 함수 ---
@@ -152,19 +157,19 @@ def student_view():
         topic = st.session_state.topic
 
         if st.session_state.s1_phase == 'guess':
-            st.subheader("📍 [Step 1] 현상 관찰 및 가설 설정")
-            
-            # [수정 1] 현상 관찰 및 가설 설정을 키워드와 화살표로 변경
+            # [수정 1 & 2] 소제목을 화살표로 변경하고 데이터 분석 결과는 문장형으로 복구
             if topic == 'A':
-                st.info("📉 **데이터 분석 결과**: 명품 소비 ➡️ 주식 투자 수익률 (양의 상관관계)")
+                st.subheader("📍 [Step 1] 명품 소비 ➡️ 주식 투자 수익률")
+                st.info("📉 **데이터 분석 결과**: 명품을 많이 사는 사람(A)이 주식 투자 수익률(B)도 높다는 결과가 나왔습니다.")
             elif topic == 'B':
-                st.info("📉 **데이터 분석 결과**: 유료 가계부 앱 사용 ➡️ 월평균 저축액 (양의 상관관계)")
+                st.subheader("📍 [Step 1] 유료 가계부 앱 사용 ➡️ 월평균 저축액")
+                st.info("📉 **데이터 분석 결과**: 유료 가계부 앱을 사용하는 사람(A)이 일반인보다 저축액(B)이 월등히 많습니다.")
             elif topic == 'C':
-                st.info("📉 **데이터 분석 결과**: 고액 유료 재무 상담 ➡️ 자산 수익률 (양의 상관관계)")
+                st.subheader("📍 [Step 1] 고액 유료 재무 상담 ➡️ 자산 수익률")
+                st.info("📉 **데이터 분석 결과**: 고가의 유료 재무 상담을 받는 사람(A)들이 스스로 투자하는 사람(B)보다 평균 자산 수익률이 15% 높습니다.")
                 
             st.warning("이 데이터만 보았을 때, 이것은 원인과 결과(인과관계)일까요, 아니면 단순한 상관관계(허위관계)일까요?")
             
-            # [수정 2] "1차" 단어 삭제
             answer1 = st.radio("당신의 판단은?", ["인과관계이다", "허위관계이다"], index=None)
             if st.button("판단 제출하기"):
                 if answer1:
@@ -202,7 +207,7 @@ def student_view():
                 
                 st.divider()
                 
-                # [수정 3] 한국어 조사 자동 변환 함수 적용
+                # [수정 3 적용] 따옴표 무시하고 올바른 조사 출력
                 if is_correct:
                     var_iga = get_josa(f"'{selected_var}'", '이가')
                     st.success(f"📊 **결과 변화**: {var_iga} 비슷한 그룹끼리만 묶어서 다시 비교해 보니, 두 현상 간의 차이가 사라졌습니다!")
@@ -246,7 +251,6 @@ def student_view():
             st.subheader("📍 [2단계] 자동이체 시스템과 저축액의 관계")
             
             st.info("📈 **연구 가설**: 자동이체 저축을 설정한 학생은 그렇지 않은 학생보다 월평균 저축액이 더 많을 것이다.")
-            # [수정 4] **조작적 정의(측정 방식)**를 -> **측정 방식**을 로 수정
             st.write("위 가설을 검증하기 위해 연구자로서 **측정 방식**을 결정하고, 그 결과를 예측해 보세요.")
             
             measure = st.radio("1. 어떤 측정 방식을 선택하시겠습니까?", 
