@@ -24,9 +24,15 @@ def get_all_results():
     response = supabase.table("causality_test").select("*").execute()
     df = pd.DataFrame(response.data)
     if not df.empty:
-        # 한국 시간(KST) 변환
         df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
     return df
+
+# [NEW] 전체 데이터 초기화 함수
+def reset_experiment_data():
+    # 1. 상태를 waiting으로 변경
+    update_experiment_state("waiting")
+    # 2. 기존 학생 데이터 모두 삭제 (student_id가 빈 값이 아닌 모든 행을 삭제)
+    supabase.table("causality_test").delete().neq("student_id", "").execute()
 
 # --- 3. 교수용 대시보드 화면 ---
 def professor_view():
@@ -36,7 +42,8 @@ def professor_view():
         st.session_state.prof_logged_in = False
 
     if not st.session_state.prof_logged_in:
-        pwd = st.text_input("교수용 비밀번호를 입력하세요:", type="password")
+        st.info("실험을 통제하려면 교수용 비밀번호를 입력하세요.")
+        pwd = st.text_input("비밀번호 (3383):", type="password")
         if st.button("로그인"):
             if pwd == "3383":
                 st.session_state.prof_logged_in = True
@@ -46,7 +53,17 @@ def professor_view():
         return
 
     current_state = get_experiment_state()
-    st.info(f"현재 실험 상태: **{current_state.upper()}**")
+    st.success(f"현재 실험 상태: **{current_state.upper()}**")
+    
+    # [NEW] 빨간색 경고 메시지와 함께 초기화 버튼 배치
+    with st.expander("⚠️ 새 수업 시작 (데이터 초기화)", expanded=False):
+        st.warning("이 버튼을 누르면 이전 반의 모든 학생 데이터가 삭제되고 실험이 대기 상태로 초기화됩니다. 필요한 경우 먼저 하단의 표에서 데이터를 다운로드하세요.")
+        if st.button("🚨 전체 데이터 삭제 및 새 수업 시작", type="primary"):
+            reset_experiment_data()
+            st.success("데이터가 초기화되었습니다!")
+            st.rerun()
+    
+    st.divider()
     
     col1, col2, col3, col4 = st.columns(4)
     if col1.button("⏳ 실험 대기"): update_experiment_state("waiting")
@@ -62,10 +79,7 @@ def professor_view():
             st.subheader("📈 실시간 진행 상황")
             st.write(f"현재 참여 인원: {len(df)}명")
             
-            # [1단계 정답률 계산: 전체 및 부분]
             st.markdown("### 📍 1단계 (초기 직관) 정답률")
-            st.caption("초기 판단에서 '허위관계'를 직관적으로 맞힌 학생의 비율입니다.")
-            
             stage1_data = df.dropna(subset=['stage1_answer'])
             if not stage1_data.empty:
                 correct_total_s1 = len(stage1_data[stage1_data['stage1_answer'] == '허위관계이다'])
@@ -80,7 +94,6 @@ def professor_view():
                         total = len(topic_data)
                         st.write(f"  * {topic_name} 배정자 중 정답: {correct}/{total} 명")
             
-            # [2단계 정답률 계산: 전체 및 부분]
             st.markdown("### 📍 2단계 (측정 수준) 정답률")
             stage2_data = df.dropna(subset=['stage2_measurement', 'stage2_answer'])
             if not stage2_data.empty:
@@ -99,11 +112,10 @@ def professor_view():
         else:
             st.warning("아직 제출된 데이터가 없습니다.")
 
-# --- 4. 학생용 화면 ---
+# --- 4. 학생용 화면 (이전과 동일) ---
 def student_view():
     st.title("📊 데이터 인과성 판독 실험")
     
-    # 학번 대신 이름만 입력
     if 'student_name' not in st.session_state:
         student_name = st.text_input("이름을 입력하세요:")
         if st.button("시작하기"):
@@ -114,21 +126,17 @@ def student_view():
 
     st.write(f"👤 참가자: **{st.session_state['student_name']}**님")
     
-    # 페이지 우측 상단이나 눈에 띄는 곳에 수동 새로고침 버튼 배치
-    st.info("💡 교수님의 안내가 있으면 아래 버튼을 누르세요.")
+    st.info("💡 교수님의 안내가 있으면 아래 새로고침 버튼을 누르세요.")
     if st.button("🔄 화면 새로고침 (다음 단계 확인)", use_container_width=True):
         st.rerun()
         
     st.divider()
     
-    # DB에서 현재 상태 확인
     current_state = get_experiment_state()
     
-    # [대기 상태]
     if current_state == "waiting":
         st.warning("⏳ 현재 대기 중입니다. 교수님의 시작 지시가 있으면 새로고침 버튼을 누르세요.")
         
-    # [1단계]
     elif current_state == "stage1":
         if 's1_phase' not in st.session_state:
             st.session_state.s1_phase = 'guess'
@@ -136,7 +144,6 @@ def student_view():
             
         topic = st.session_state.topic
 
-        # --- Phase 1: 현상 관찰 및 초기 가설 제출 ---
         if st.session_state.s1_phase == 'guess':
             st.subheader("📍 [Step 1] 현상 관찰 및 가설 설정")
             
@@ -152,7 +159,6 @@ def student_view():
             answer1 = st.radio("당신의 1차 판단은?", ["선택하세요", "인과관계이다", "허위관계이다"])
             if st.button("판단 제출하기"):
                 if answer1 != "선택하세요":
-                    # DB 저장
                     response = supabase.table("causality_test").insert({
                         "student_id": st.session_state['student_name'],
                         "stage1_topic": topic,
@@ -164,7 +170,6 @@ def student_view():
                 else:
                     st.error("답안을 선택해주세요.")
 
-        # --- Phase 2: 제3의 요인(통제변수) 직접 투입 실습 ---
         elif st.session_state.s1_phase == 'explore':
             st.subheader("📍 [Step 2] 제3의 요인 투입 (검증)")
             st.write("방금 내린 판단이 맞는지, 분석 모델에 다양한 **통제변수**를 투입하여 확인해 봅시다.")
@@ -199,11 +204,9 @@ def student_view():
                     st.error(f"📉 **결과 변화**: '{selected_var}'(을)를 기준으로 그룹을 나누어 보았지만, 두 현상 간의 강한 상관관계가 그대로 남아있습니다.")
                     st.write("이 변수는 핵심을 찌르는 제3의 요인이 아닌 것 같습니다. 다른 변수를 선택해 투입해 보세요!")
 
-        # --- Phase 3: 1단계 완료 대기 ---
         elif st.session_state.s1_phase == 'done':
             st.success("✅ 1단계 탐구를 성공적으로 마쳤습니다. 교수님의 2단계 지시가 있을 때까지 대기해주세요.")
 
-    # [2단계]
     elif current_state == "stage2":
         if 'stage2_done' in st.session_state:
             st.success("✅ 2단계 답안을 제출했습니다. 화면 최상단의 새로고침을 눌러 결과를 확인하거나 대기하세요.")
@@ -234,12 +237,14 @@ def student_view():
                     else:
                         st.error("판별 결과를 선택해주세요.")
 
-    # [결과 확인]
     elif current_state == "results":
         st.success("🎉 모든 실험이 종료되었습니다. 강단 화면에서 우리 반의 종합 통계를 확인하세요.")
 
-# --- 5. 메인 라우팅 ---
-if "role" in st.query_params and st.query_params["role"] == "prof":
+# --- 5. 메인 라우팅 (사이드바로 통합) ---
+st.sidebar.title("접속 모드 선택")
+mode = st.sidebar.radio("원하는 모드를 선택하세요:", ["🧑‍🎓 학생 화면", "👨‍🏫 교수 화면 (관리자)"])
+
+if mode == "👨‍🏫 교수 화면 (관리자)":
     professor_view()
 else:
     student_view()
