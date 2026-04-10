@@ -12,6 +12,17 @@ def init_connection():
 
 supabase: Client = init_connection()
 
+# --- 한국어 조사 처리 함수 (받침 유무 판별) ---
+def get_josa(word, josa_type):
+    last_char = word[-1]
+    if '가' <= last_char <= '힣':
+        has_batchim = (ord(last_char) - ord('가')) % 28 > 0
+        if josa_type == '이가':
+            return word + ('이' if has_batchim else '가')
+        elif josa_type == '을를':
+            return word + ('을' if has_batchim else '를')
+    return word + ('(이)가' if josa_type == '이가' else '(을)를')
+
 # --- 2. 데이터베이스 제어 함수 ---
 def get_experiment_state():
     response = supabase.table("causality_experiment_state").select("status").eq("id", 1).execute()
@@ -40,7 +51,6 @@ def professor_view():
 
     if not st.session_state.prof_logged_in:
         st.info("실험을 통제하려면 교수용 비밀번호를 입력하세요.")
-        # [수정 1] 비밀번호(3383) 힌트 제거 및 숨김 처리
         pwd = st.text_input("교수용 비밀번호:", type="password")
         if st.button("로그인"):
             if pwd == "3383":
@@ -105,7 +115,6 @@ def professor_view():
             else:
                 st.write("2단계 데이터 제출 전입니다.")
             
-            # [수정 3] 교수 화면 데이터프레임에서 'id' 열 숨김 처리
             st.dataframe(df.drop(columns=['id'], errors='ignore'))
         else:
             st.warning("아직 제출된 데이터가 없습니다.")
@@ -145,17 +154,18 @@ def student_view():
         if st.session_state.s1_phase == 'guess':
             st.subheader("📍 [Step 1] 현상 관찰 및 가설 설정")
             
+            # [수정 1] 현상 관찰 및 가설 설정을 키워드와 화살표로 변경
             if topic == 'A':
-                st.info("📉 **데이터 분석 결과**: 명품을 많이 사는 사람(A)이 주식 투자 수익률(B)도 높다는 결과가 나왔습니다.")
+                st.info("📉 **데이터 분석 결과**: 명품 소비 ➡️ 주식 투자 수익률 (양의 상관관계)")
             elif topic == 'B':
-                st.info("📉 **데이터 분석 결과**: 유료 가계부 앱을 사용하는 사람(A)이 일반인보다 저축액(B)이 월등히 많습니다.")
+                st.info("📉 **데이터 분석 결과**: 유료 가계부 앱 사용 ➡️ 월평균 저축액 (양의 상관관계)")
             elif topic == 'C':
-                st.info("📉 **데이터 분석 결과**: 고가의 유료 재무 상담을 받는 사람(A)들이 스스로 투자하는 사람(B)보다 평균 자산 수익률이 15% 높습니다.")
+                st.info("📉 **데이터 분석 결과**: 고액 유료 재무 상담 ➡️ 자산 수익률 (양의 상관관계)")
                 
             st.warning("이 데이터만 보았을 때, 이것은 원인과 결과(인과관계)일까요, 아니면 단순한 상관관계(허위관계)일까요?")
             
-            # [수정 2] index=None을 사용하여 "선택하세요" 옵션 제거
-            answer1 = st.radio("당신의 1차 판단은?", ["인과관계이다", "허위관계이다"], index=None)
+            # [수정 2] "1차" 단어 삭제
+            answer1 = st.radio("당신의 판단은?", ["인과관계이다", "허위관계이다"], index=None)
             if st.button("판단 제출하기"):
                 if answer1:
                     response = supabase.table("causality_test").insert({
@@ -174,7 +184,6 @@ def student_view():
             st.write("방금 내린 판단이 맞는지, 분석 모델에 다양한 **통제변수**를 투입하여 확인해 봅시다.")
             
             variables = ['나이', '성별', '소득 수준', '재무 목표 의식']
-            # [수정 2] index=None 및 placeholder 적용
             selected_var = st.selectbox("투입할 통제변수를 선택하세요:", variables, index=None, placeholder="변수를 선택하세요")
             
             if selected_var:
@@ -192,9 +201,11 @@ def student_view():
                     explanation = "실제 원인은 '재무 상담' 자체가 아니라, 상담을 받을 여유가 있는 **'높은 소득 수준'**입니다. 이 소득 수준이 정보 접근성이나 투자 여력을 높여 수익률을 끌어올린 공통 요인이었습니다."
                 
                 st.divider()
+                
+                # [수정 3] 한국어 조사 자동 변환 함수 적용
                 if is_correct:
-                    # [수정 4] "(그래프가 평평해짐)" 텍스트 삭제
-                    st.success(f"📊 **결과 변화**: '{selected_var}'(이)가 비슷한 그룹끼리만 묶어서 다시 비교해 보니, 두 현상 간의 차이가 사라졌습니다!")
+                    var_iga = get_josa(f"'{selected_var}'", '이가')
+                    st.success(f"📊 **결과 변화**: {var_iga} 비슷한 그룹끼리만 묶어서 다시 비교해 보니, 두 현상 간의 차이가 사라졌습니다!")
                     st.markdown("### 📍 [Step 3] 판독 결과: 허위관계 (Spurious Relationship)")
                     st.info(f"**해설:** {explanation}")
                     
@@ -202,7 +213,8 @@ def student_view():
                         st.session_state.s1_phase = 'done'
                         st.rerun()
                 else:
-                    st.error(f"📉 **결과 변화**: '{selected_var}'(을)를 기준으로 그룹을 나누어 보았지만, 두 현상 간의 강한 상관관계가 그대로 남아있습니다.")
+                    var_eul = get_josa(f"'{selected_var}'", '을를')
+                    st.error(f"📉 **결과 변화**: {var_eul} 기준으로 그룹을 나누어 보았지만, 두 현상 간의 강한 상관관계가 그대로 남아있습니다.")
                     st.write("이 변수는 핵심을 찌르는 제3의 요인이 아닌 것 같습니다. 다른 변수를 선택해 투입해 보세요!")
 
         elif st.session_state.s1_phase == 'done':
@@ -210,10 +222,8 @@ def student_view():
 
     elif current_state == "stage2":
         if 'stage2_done' in st.session_state:
-            # [수정 6] "화면 최상단의 새로고침을..." 문구 삭제
             st.success("✅ 2단계 답안 제출이 완료되었습니다. 아래 분석 결과와 해설을 확인하세요.")
             
-            # [수정 7] 제출 후 정답 해설 및 타 측정 방식과의 비교 제공
             my_measure = st.session_state.get('my_s2_measure', '')
             my_ans = st.session_state.get('my_s2_ans', '')
             
@@ -235,11 +245,10 @@ def student_view():
         else:
             st.subheader("📍 [2단계] 자동이체 시스템과 저축액의 관계")
             
-            # [수정 8] 가설을 정확하게 먼저 제시
             st.info("📈 **연구 가설**: 자동이체 저축을 설정한 학생은 그렇지 않은 학생보다 월평균 저축액이 더 많을 것이다.")
-            st.write("위 가설을 검증하기 위해 연구자로서 **조작적 정의(측정 방식)**를 결정하고, 그 결과를 예측해 보세요.")
+            # [수정 4] **조작적 정의(측정 방식)**를 -> **측정 방식**을 로 수정
+            st.write("위 가설을 검증하기 위해 연구자로서 **측정 방식**을 결정하고, 그 결과를 예측해 보세요.")
             
-            # [수정 5 & 7] 선택 옵션을 동시에 보여주고, '선택하세요' 제거
             measure = st.radio("1. 어떤 측정 방식을 선택하시겠습니까?", 
                                ["A. 명목측정 (자동이체 설정 여부: 예/아니오)", 
                                 "B. 비율측정 (전체 소득 대비 자동이체 설정 금액의 비율: %)"], index=None)
@@ -256,7 +265,6 @@ def student_view():
                             "stage2_answer": ans2
                         }).eq("id", st.session_state['record_id']).execute()
                         
-                        # 해설 출력을 위해 세션에 저장
                         st.session_state['stage2_done'] = True
                         st.session_state['my_s2_measure'] = measure_val
                         st.session_state['my_s2_ans'] = ans2
